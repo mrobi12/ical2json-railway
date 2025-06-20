@@ -4,7 +4,7 @@ import icalendar
 from flask import Flask, Response, request
 from urllib.parse import unquote
 from datetime import datetime, timedelta, timezone
-from recurring_ical_events import recurring_ical_events
+import recurring_ical_events  # Fixed import
 
 app = Flask(__name__)
 
@@ -35,10 +35,11 @@ def ical_to_json(url):
         else:
             target_date = datetime.now(timezone.utc).date()
 
-        # Get all recurring events expanded for that day
+        # Define day range
         day_start = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
         day_end = day_start + timedelta(days=1)
 
+        # Get all recurring events expanded for that day
         events = recurring_ical_events.of(cal).between(day_start, day_end)
 
         output = []

@@ -1,3 +1,5 @@
-flask
+Flask
 requests
 icalendar
+python-dateutil
+recurring_ical_events

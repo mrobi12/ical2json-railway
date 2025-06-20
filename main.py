@@ -4,7 +4,7 @@ import icalendar
 from flask import Flask, Response, request
 from urllib.parse import unquote
 from datetime import datetime, timedelta, timezone
-from dateutil.rrule import rrulestr
+from recurring_ical_events import recurring_ical_events
 
 app = Flask(__name__)
 
@@ -22,11 +22,10 @@ def ical_to_json(url):
         if response.status_code != 200:
             return Response(f"Failed to fetch calendar: {response.status_code}", status=500)
 
-        # Parse iCal
+        # Parse calendar
         cal = icalendar.Calendar.from_ical(response.content)
-        events = []
 
-        # Target date (default to today)
+        # Get target date from query, default to today
         date_str = request.args.get('date')
         if date_str:
             try:
@@ -36,43 +35,23 @@ def ical_to_json(url):
         else:
             target_date = datetime.now(timezone.utc).date()
 
-        for component in cal.walk():
-            if component.name != "VEVENT":
-                continue
+        # Get all recurring events expanded for that day
+        day_start = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
+        day_end = day_start + timedelta(days=1)
 
-            dtstart = component.get('DTSTART').dt
-            dtend = component.get('DTEND').dt if component.get('DTEND') else None
+        events = recurring_ical_events.of(cal).between(day_start, day_end)
 
-            # Handle recurring events
-            rrule_raw = component.get('RRULE')
-            if rrule_raw:
-                # Generate occurrences using rrulestr
-                rrule_text = '\n'.join([f"{key}={','.join(value)}" for key, value in rrule_raw.items()])
-                rule = rrulestr(rrule_text, dtstart=dtstart)
-                occurrences = rule.between(
-                    datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc),
-                    datetime.combine(target_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc),
-                    inc=True
-                )
-                if not occurrences:
-                    continue  # Skip if not happening on this date
-                dtstart = occurrences[0]  # Set to the actual occurrence datetime
-            else:
-                # Non-repeating event: filter by date
-                dt = dtstart.date() if isinstance(dtstart, datetime) else dtstart
-                if dt != target_date:
-                    continue
-
-            # Convert event fields safely
-            event = {}
-            for k, v in component.items():
+        output = []
+        for event in events:
+            event_data = {}
+            for k, v in event.items():
                 try:
-                    event[k] = v.to_ical().decode()
+                    event_data[k] = v.to_ical().decode()
                 except Exception:
-                    event[k] = str(v)
-            events.append(event)
+                    event_data[k] = str(v)
+            output.append(event_data)
 
-        return Response(json.dumps(events, indent=2), mimetype='application/json')
+        return Response(json.dumps(output, indent=2), mimetype='application/json')
 
     except Exception as e:
         return Response(f"Error: {str(e)}", status=500)

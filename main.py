@@ -5,70 +5,60 @@ from flask import Flask, Response, request
 from urllib.parse import unquote
 from datetime import datetime, timedelta, timezone
 import recurring_ical_events
-from zoneinfo import ZoneInfo  # Python 3.9+
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
-
 brisbane_tz = ZoneInfo("Australia/Brisbane")
 
 @app.route('/<path:url>')
 def ical_to_json(url):
     try:
-        # Decode URL
+        # Decode and prepare the calendar URL
         decoded_url = unquote(url)
         if not decoded_url.startswith('http'):
             decoded_url = 'https://' + decoded_url
 
-        # Fetch calendar data
+        # Download the .ics file
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(decoded_url, headers=headers)
         if response.status_code != 200:
             return Response(f"Failed to fetch calendar: {response.status_code}", status=500)
 
-        # Parse calendar
+        # Parse the calendar
         cal = icalendar.Calendar.from_ical(response.content)
 
-        # Target date from query, default Brisbane "today"
+        # Determine the target date (default to today Brisbane time)
         date_str = request.args.get('date')
         if date_str:
-            try:
-                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            except ValueError:
-                return Response("Invalid date format. Use YYYY-MM-DD.", status=400)
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         else:
-            # Use Brisbane now date, not UTC
             target_date = datetime.now(brisbane_tz).date()
 
-        # Define day range in Brisbane TZ
-        day_start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=brisbane_tz)
+        # Get Brisbane-local datetime range for the day
+        day_start = datetime.combine(target_date, datetime.min.time(), tzinfo=brisbane_tz)
         day_end = day_start + timedelta(days=1)
 
-        # Get expanded recurring events within that Brisbane day range
+        # Expand recurring events
         events = recurring_ical_events.of(cal).between(day_start, day_end)
 
         output = []
         for event in events:
-            # Convert DTSTART to Brisbane timezone to confirm date
-            dtstart = event.get('DTSTART').dt
-            if isinstance(dtstart, datetime):
-                if dtstart.tzinfo is None:
-                    dtstart = dtstart.replace(tzinfo=timezone.utc)
-                dtstart_local = dtstart.astimezone(brisbane_tz)
-                event_date = dtstart_local.date()
-            else:
-                event_date = dtstart
-
-            # Double-check event falls on the target date in Brisbane time
-            if event_date != target_date:
-                continue
-
-            event_data = {}
+            item = {}
             for k, v in event.items():
                 try:
-                    event_data[k] = v.to_ical().decode()
+                    if k in ["DTSTART", "DTEND", "DTSTAMP", "CREATED", "LAST-MODIFIED", "RECURRENCE-ID"]:
+                        dt = v.dt
+                        if isinstance(dt, datetime):
+                            # Convert to Brisbane time
+                            dt = dt.astimezone(brisbane_tz)
+                            item[k] = dt.isoformat()
+                        else:
+                            item[k] = str(dt)
+                    else:
+                        item[k] = v.to_ical().decode()
                 except Exception:
-                    event_data[k] = str(v)
-            output.append(event_data)
+                    item[k] = str(v)
+            output.append(item)
 
         return Response(json.dumps(output, indent=2), mimetype='application/json')
 

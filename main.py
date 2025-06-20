@@ -1,5 +1,11 @@
+import json
+import requests
+import icalendar
+from flask import Flask, Response, request
+from urllib.parse import unquote
 from datetime import datetime, timedelta, timezone
-from flask import request
+
+app = Flask(__name__)
 
 @app.route('/<path:url>')
 def ical_to_json(url):
@@ -16,18 +22,24 @@ def ical_to_json(url):
         cal = icalendar.Calendar.from_ical(response.content)
         events = []
 
-        # Check for today filter
+        # Set up date filtering
         today_filter = request.args.get('today', 'false').lower() == 'true'
         now = datetime.now(timezone.utc)
-        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_of_day = start_of_day + timedelta(days=1)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = today_start + timedelta(days=1)
 
         for component in cal.walk():
             if component.name == "VEVENT":
                 dtstart = component.get('DTSTART').dt
+
+                # Ensure dtstart is a datetime object
                 if isinstance(dtstart, datetime):
-                    if today_filter and not (start_of_day <= dtstart < end_of_day):
-                        continue  # Skip events not today
+                    if today_filter and not (today_start <= dtstart < today_end):
+                        continue
+                elif isinstance(dtstart, datetime.date):
+                    if today_filter and dtstart != now.date():
+                        continue
+
                 event = {k: str(v) for k, v in component.items()}
                 events.append(event)
 
@@ -35,3 +47,6 @@ def ical_to_json(url):
 
     except Exception as e:
         return Response(f"Error: {str(e)}", status=500)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)

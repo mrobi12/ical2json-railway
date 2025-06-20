@@ -22,22 +22,27 @@ def ical_to_json(url):
         cal = icalendar.Calendar.from_ical(response.content)
         events = []
 
-        # Set up date filtering
-        today_filter = request.args.get('today', 'false').lower() == 'true'
-        now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start + timedelta(days=1)
+        # 📅 DATE FILTER: ?date=YYYY-MM-DD
+        date_str = request.args.get('date')
+        if date_str:
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return Response("Invalid date format. Use YYYY-MM-DD.", status=400)
+        else:
+            # Default to today
+            target_date = datetime.now(timezone.utc).date()
 
         for component in cal.walk():
             if component.name == "VEVENT":
                 dtstart = component.get('DTSTART').dt
 
-                # Ensure dtstart is a datetime object
+                # Filter events by date (support datetime or date types)
                 if isinstance(dtstart, datetime):
-                    if today_filter and not (today_start <= dtstart < today_end):
+                    if dtstart.date() != target_date:
                         continue
                 elif isinstance(dtstart, datetime.date):
-                    if today_filter and dtstart != now.date():
+                    if dtstart != target_date:
                         continue
 
                 event = {k: str(v) for k, v in component.items()}
